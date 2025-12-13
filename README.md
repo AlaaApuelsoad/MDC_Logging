@@ -1,161 +1,261 @@
-# Logging & MDC Guide for Spring Boot
+# Logging, MDC & Context Propagation in Spring Boot
 
-This guide introduces the fundamentals of logging, explains SLF4J, logging frameworks, and demonstrates how a Spring Boot application processes HTTP requests—laying the foundation for understanding Mapped Diagnostic Context (MDC).
+This README explains **logging**, **MDC (Mapped Diagnostic Context)**, and a **common real-world problem: losing context across threads**, then shows the **correct solution using **``.
 
-##  1. Importance of Logging
+The goal is to be **simple, practical, and straight to the point**.
 
-Observability & Monitoring: Logging is one of the three pillars of observability: metrics, logs, traces.
+---
 
-Logging is essential for any backend system. It provides insight into what the application is doing at runtime and is the foundation for debugging and observability.
+## 1. Why Logging Matters
 
-Understanding Application Behavior: Logs help developers see how requests flow and how services behave during execution.
+Logging is a core part of **observability** (Logs, Metrics, Traces).
 
-Troubleshooting Issues: When failures or unexpected behavior occur, logs are the first source of truth.
+You need logs to:
 
-Tracing User Activities: Logging helps correlate user actions across multiple services in distributed systems.
+* Understand application behavior
+* Debug errors and production issues
+* Trace a single request across layers and services
+* Meet audit and compliance requirements
 
-Compliance & Audit Requirements: Systems in domains like healthcare or finance rely heavily on structured logging for audits.
+Without good logging, debugging distributed systems is almost impossible.
 
-##  2. What Is SLF4J?
+---
 
-![diagram](https://github.com/AlaaApuelsoad/MDC_Logging/blob/master/images/SLF4J.png)
-SLF4J (Simple Logging Facade for Java) is an abstraction layer for logging in Java.
-It does not write logs by itself. Instead, your application depends on SLF4J APIs, and an actual logging implementation performs the real work.
-SLF4J provides a common API, allowing developers to log using log.info(), log.error(), etc., while plugging in any backend at runtime.
-This means you can switch from Logback to Log4j2 without modifying your application code.
+## 2. What Is SLF4J?
 
+**SLF4J (Simple Logging Facade for Java)** is a logging abstraction.
 
-##  3. What Is MDC and Why Does It Matter?
+* Your code logs using `log.info()`, `log.error()`
+* SLF4J delegates to a real implementation (Logback, Log4j2, etc.)
+* You can change the logging framework **without changing your code**
 
-MDC (Mapped Diagnostic Context) allows adding contextual key–value data to logs.
-This improves traceability and debugging, especially in multi-user or multi-threaded applications.
+---
 
-Examples of MDC Values
+## 3. What Is MDC (Mapped Diagnostic Context)?
 
-requestId
+**MDC allows you to attach key–value data to logs.**
 
-correlationId
+Typical MDC values:
 
-userId
+* `traceId`
+* `requestId`
+* `userId`
+* `tenantId`
+* `ipAddress`
 
-ipAddress
+MDC data is stored in a **ThreadLocal**, meaning:
 
-sessionId
+* It is available only inside the current thread
+* All logs in that thread automatically include the context
 
-MDC attaches data to the thread that is processing the request, ensuring all logs during that request contain the same context.
+Example:
 
-This is extremely useful for tracking an individual request through:
+```java
+MDC.put("traceId", "abc-123");
+log.info("Processing request");
+```
 
-Filters
+Log output:
 
-Controllers
+```text
+[abc-123] Processing request
+```
 
-Services
+---
 
-Repository layer
+## 4. Spring Boot HTTP Request Flow (High Level)
 
-Asynchronous tasks (with decorators)
+```text
+Client
+ ↓
+Embedded Server (Tomcat)
+ ↓
+Filter Chain   ← Best place to set MDC
+ ↓
+DispatcherServlet
+ ↓
+Controller
+ ↓
+Service
+ ↓
+Repository
+ ↓
+Database
+```
 
+MDC is usually:
 
-# Spring Boot Request Flow
+* **Added in a Filter (request start)**
+* **Cleared at the end of the request**
 
-This document explains the full **HTTP request flow inside Spring /
-Spring Boot**, from the moment a client sends a request until a response
-is returned.
+---
 
-##  1. Client Sends an HTTP Request
+## 5. The Context Problem
 
-Example requests: - `GET /users` - `POST /login` - `PUT /products/5`
+MDC, SecurityContext, and TenantContext are stored in **ThreadLocal**.
 
-The request arrives at the Spring Boot embedded server.
+### What goes wrong?
 
-##  2. Embedded Server Receives the Request
+When you use:
 
-Spring Boot uses an embedded servlet container: - Tomcat (default) -
-Jetty - Undertow
+* `@Async`
+* Thread pools
+* `CompletableFuture`
 
-## 3. Filter Chain
+the code runs in **another thread**.
 
-Filters run before and after request processing.
+That means:
 
-## 4. DispatcherServlet (The Heart of Spring MVC)
+```java
+TenantContext.getTenant(); // null 
+MDC.get("traceId");        // null 
+```
 
-Central controller that routes all Spring MVC requests.
+Because **ThreadLocal data does NOT propagate automatically**.
 
-## 5. Handler Mapping
+---
 
-DispatcherServlet checks which controller should handle the request.
+## 6. Example: TenantContext Using ThreadLocal
 
-## 6. HandlerAdapter
+```java
+public class TenantContext {
+    private static final ThreadLocal<String> TENANT = new ThreadLocal<>();
 
-Executes the matched controller.
+    public static void setTenant(String tenant) {
+        TENANT.set(tenant);
+    }
 
-## 7. Controller Method Executes
+    public static String getTenant() {
+        return TENANT.get();
+    }
 
-Spring handles: - argument resolving\
-- validation\
-- request body parsing
+    public static void clear() {
+        TENANT.remove();
+    }
+}
+```
 
-## 8. Service Layer
+Works in the same thread fails in async threads.
 
-Business logic lives here.
+---
 
-## 9. Repository Layer
+## 7. The Correct Solution: TaskDecorator
 
-Interacts with the database using JPA / JDBC / Hibernate.
+``** allows you to capture context in the calling thread and restore it in the worker thread.**
 
-## 10. Response Returned
+This is the **recommended and production-safe solution**.
 
-## 11. View Resolver (MVC only)
+---
 
-## 12. HttpMessageConverter
+## 8. How TaskDecorator Works (Conceptually)
 
-Converts response into JSON / XML.
+```text
+Caller Thread
+ ├─ Context exists (tenant, MDC)
+ ├─ TaskDecorator captures context
+ └─ Submits wrapped task
 
-## 13. Post-filters
+Worker Thread
+ ├─ Restores context
+ ├─ Executes business logic
+ └─ Clears context
+```
 
-## 14. Response Sent Back to Client
+---
 
-# Overview diagram
-![Flow Diagram](https://github.com/AlaaApuelsoad/MDC_Logging/blob/master/images/RequestFlow.png)
+## 9. Tenant Context Propagation with TaskDecorator
 
-# Full Request Flow Diagram
+### TaskDecorator Implementation
 
-    Client
-       ↓
-    Embedded Server
-       ↓
-    Filter Chain
-       ↓
-    DispatcherServlet
-       ↓
-    HandlerMapping
-       ↓
-    HandlerAdapter
-       ↓
-    Controller
-       ↓
-    Service
-       ↓
-    Repository
-       ↓
-    Database
-       ↑
-    Response
-       ↑
-    HttpMessageConverter
-       ↑
-    DispatcherServlet
-       ↑
-    Filters
-       ↑
-    Client
+```java
+public class TenantTaskDecorator implements TaskDecorator {
 
+    @Override
+    public Runnable decorate(Runnable runnable) {
+        String tenant = TenantContext.getTenant();
+
+        return () -> {
+            try {
+                if (tenant != null) {
+                    TenantContext.setTenant(tenant);
+                }
+                runnable.run();
+            } finally {
+                TenantContext.clear();
+            }
+        };
+    }
+}
+```
+
+---
+
+### Registering the Decorator
+
+```java
+@Configuration
+@EnableAsync
+public class AsyncConfig {
+
+    @Bean
+    public ThreadPoolTaskExecutor taskExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(5);
+        executor.setMaxPoolSize(10);
+        executor.setQueueCapacity(100);
+        executor.setTaskDecorator(new TenantTaskDecorator());
+        executor.initialize();
+        return executor;
+    }
+}
+```
+
+Now:
+
+* `@Async`
+* Thread pool tasks
+* `CompletableFuture` (using this executor)
+
+➡ automatically receive tenant context.
+
+---
+
+## 10. Combining MDC + Tenant Context (Best Practice)
+
+In real systems you usually propagate:
+
+* MDC
+* Tenant
+* SecurityContext
+
+Always:
+
+* Capture context **before thread switch**
+* Restore context **inside worker thread**
+* Clear context **after execution**
+
+---
+
+## 11. Common Mistakes (A
+
+* Forgetting to clear ThreadLocal values
+* Using `InheritableThreadLocal` with thread pools
+* Creating threads manually with `new Thread()`
+* Assuming MDC works automatically in async code
+
+---
+
+## 12. Key Takeaways
+
+* MDC and TenantContext are **ThreadLocal-based**
+* ThreadLocal data does **not propagate across threads**
+* Thread pools reuse threads → risk of context leaks
+* **TaskDecorator is the correct and safe solution**
+
+---
 
 ## Reference Articles
-[Filter vs Interceptors](https://medium.com/@rhom159/filters-vs-interceptors-in-spring-a-simple-guide-for-easy-understanding-70f5e397fa32)
-[Thread vs ThreadLocal](https://medium.com/@sachinkg12/understanding-threadlocal-vs-thread-in-java-a908b5390207)
-[MDC](https://medium.com/@sudacgb/enhancing-logging-in-spring-boot-with-mapped-diagnostic-context-mdc-a-step-by-step-tutorial-0a57b0304dd3)
 
-
-
+* [Filter vs Interceptors](https://medium.com/@rhom159/filters-vs-interceptors-in-spring-a-simple-guide-for-easy-understanding-70f5e397fa32)
+* [Thread vs ThreadLocal](https://medium.com/@sachinkg12/understanding-threadlocal-vs-thread-in-java-a908b5390207)
+* [MDC Guide](https://medium.com/@sudacgb/enhancing-logging-in-spring-boot-with-mapped-diagnostic-context-mdc-a-step-by-step-tutorial-0a57b0304dd3)
