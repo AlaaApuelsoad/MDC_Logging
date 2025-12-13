@@ -22,6 +22,7 @@ Without good logging, debugging distributed systems is almost impossible.
 ---
 
 ## 2. What Is SLF4J?
+![diagram](https://github.com/AlaaApuelsoad/MDC_Logging/blob/master/images/SLF4J.png)
 
 **SLF4J (Simple Logging Facade for Java)** is a logging abstraction.
 
@@ -64,6 +65,8 @@ Log output:
 ---
 
 ## 4. Spring Boot HTTP Request Flow (High Level)
+![Flow Diagram](https://github.com/AlaaApuelsoad/MDC_Logging/blob/master/images/RequestFlow.png)
+
 
 ```text
 Client
@@ -259,3 +262,4 @@ Always:
 * [Filter vs Interceptors](https://medium.com/@rhom159/filters-vs-interceptors-in-spring-a-simple-guide-for-easy-understanding-70f5e397fa32)
 * [Thread vs ThreadLocal](https://medium.com/@sachinkg12/understanding-threadlocal-vs-thread-in-java-a908b5390207)
 * [MDC Guide](https://medium.com/@sudacgb/enhancing-logging-in-spring-boot-with-mapped-diagnostic-context-mdc-a-step-by-step-tutorial-0a57b0304dd3)
+
