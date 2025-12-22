@@ -9,6 +9,8 @@ import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.UUID;
 
 @Component
@@ -18,11 +20,13 @@ public class CorrelationIDFilter extends OncePerRequestFilter {
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain) {
         long startTime = System.currentTimeMillis();
+        LocalDate date = LocalDate.now();
+        long unixTime = date.atStartOfDay(ZoneId.of("UTC")).toEpochSecond(); //add unixTime for CorrelationID
         String correlationId;
         try {
             correlationId = request.getHeader("X-Correlation-ID");
             if (correlationId == null) {
-                correlationId = UUID.randomUUID().toString();
+                correlationId = unixTime + "-" + UUID.randomUUID();
                 request.setAttribute("X-Correlation-ID", correlationId); //add to request attributes for logging
                 response.setHeader("X-Correlation-ID", correlationId); // add to response headers for clients
             }
