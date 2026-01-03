@@ -26,13 +26,13 @@ public class AuthenticationFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain) throws ServletException, IOException {
 
         /**
-         * Simulation for validating user token in the request.
-         * if user authenticated spring security will generate a new authentication object.
-         * extract userInfo form the authentication Object.
-         * add the object to the userContext.
+         * Simulation for validating the user token in the request.
+         * If the user is authenticated, spring security will generate a new authentication object.
+         * Extract userInfo from the authentication Object.
+         * Add the object to the userContext.
          */
         try {
-            //loggedIn user data getting from authentication object
+            //loggedIn user data getting from an authentication object
             UserInfo userInfo = UserInfo.builder()
                     .userId(1)
                     .userName("alaaapuelsoad")
